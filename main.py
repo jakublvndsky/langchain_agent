@@ -1,5 +1,8 @@
 import os
 import requests
+import nest_asyncio
+import asyncio
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from typing import Literal
 from dotenv import load_dotenv
 from langchain.messages import SystemMessage, HumanMessage
@@ -9,6 +12,25 @@ from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
 
 load_dotenv()
+
+nest_asyncio.apply()
+
+
+async def load_mcp():
+    mcp_client = MultiServerMCPClient(
+        {
+            "time": {
+                "transport": "stdio",
+                "command": "npx",
+                "args": ["-y", "@theo.foobar/mcp-time"],
+            }
+        },
+    )
+
+    mcp_tools = await mcp_client.get_tools()
+    print(f"Loaded {len(mcp_tools)} MCP tools: {[t.name for t in mcp_tools]}")
+    return mcp_tools
+
 
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
@@ -26,7 +48,7 @@ class LLMError(Exception):
 def liczenie(
     a: int | float, b: int | float, znak: Literal["+", "-", "*", "/"]
 ) -> float:
-    """Pozwala obliczyć dwie liczby dodawanie lub odejmowanie
+    """Pozwala obliczyć dwie liczby
 
     Args:
         a: pierwsza liczba w działaniu
@@ -57,7 +79,7 @@ def liczenie(
     description=("Sluzy do wyszukiwania kursu waluty po jej kodzie zgodnie z ISO 4217"),
     parse_docstring=True,
 )
-def sprawdz_kurs_waluty(kod_waluty: str) -> str:
+def sprawdz_kurs_waluty(kod_waluty: str) -> dict:
     """Sprawdza kursy walut z polskiej na waluty obce
 
     Args:
@@ -82,17 +104,35 @@ ollama_provider = ChatOllama(model="llama3.2:3b", temperature=0.4)
 
 system_msg = SystemMessage(
     """Jesteś moim osobistym pomocnikiem o imieniu Orion, a ja mam na imię Kuba. 
-        Obecnie masz bardzo prostego toola podłączonego, który potrafi liczyć proste rzeczy dodawanie, odejmowanie, mnożenie i dzielenie."""
+        Obecnie masz bardzo prostego toola podłączonego, który potrafi liczyć proste rzeczy dodawanie, odejmowanie, mnożenie i dzielenie.
+        Drugi tool to wyszukiwanie uśrednionego kursu walut wedle kursu NBP - nalezy podawać kod waluty zgodny z oznaczeniem ISO 4217
+        Trzeci tool to serwer mcp, który jest od sprawdzania czasu
+    """
 )
 human_msg = HumanMessage(
-    "Sprawdź kurs waluty dolara amerykańskiego, a następnie oblicz ile by go było za 100 złotych"
+    "Sprawdź kurs waluty dolara amerykańskiego, a następnie oblicz ile by go było za 100 złotych oraz sprawdź godzinę w Nowym Jorku"
 )
 
 
-agent = create_agent(
-    model=provider, tools=[liczenie, sprawdz_kurs_waluty], system_prompt=system_msg
-)
+async def build_agent():
+    mcp_tools = await load_mcp()
+    agent = create_agent(
+        model=provider,
+        tools=[liczenie, sprawdz_kurs_waluty, *mcp_tools],
+        system_prompt=system_msg,
+    )
 
-for response in agent.stream({"messages": [human_msg]}, stream_mode="values"):
-    response["messages"][-1].pretty_print()
-    # print(response.content, end="")
+    return agent
+
+
+async def agent_run():
+    agent = await build_agent()
+    async for response in agent.astream(
+        {"messages": [human_msg]}, stream_mode="values"
+    ):
+        response["messages"][-1].pretty_print()
+        # print(response.content, end="")
+
+
+if __name__ == "__main__":
+    asyncio.run(agent_run())

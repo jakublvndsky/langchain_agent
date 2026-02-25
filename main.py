@@ -10,6 +10,7 @@ from langchain.tools import tool
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
+from langgraph.checkpoint.memory import InMemorySaver
 
 load_dotenv()
 
@@ -113,6 +114,8 @@ human_msg = HumanMessage(
     "Sprawdź kurs waluty dolara amerykańskiego, a następnie oblicz ile by go było za 100 złotych oraz sprawdź godzinę w Nowym Jorku"
 )
 
+config = {"configurable": {"thread_id": "1"}}
+
 
 async def build_agent():
     mcp_tools = await load_mcp()
@@ -120,18 +123,23 @@ async def build_agent():
         model=provider,
         tools=[liczenie, sprawdz_kurs_waluty, *mcp_tools],
         system_prompt=system_msg,
+        checkpointer=InMemorySaver(),
     )
 
     return agent
 
 
+steps = []
+
+
 async def agent_run():
     agent = await build_agent()
     async for response in agent.astream(
-        {"messages": [human_msg]}, stream_mode="values"
+        {"messages": [human_msg]}, config=config, stream_mode="values"
     ):
         response["messages"][-1].pretty_print()
         # print(response.content, end="")
+        steps.append(response)
 
 
 if __name__ == "__main__":

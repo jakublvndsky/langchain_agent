@@ -115,6 +115,7 @@ human_msg = HumanMessage(
 )
 
 config = {"configurable": {"thread_id": "1"}}
+checkpointer = InMemorySaver()
 
 
 async def build_agent():
@@ -123,7 +124,7 @@ async def build_agent():
         model=provider,
         tools=[liczenie, sprawdz_kurs_waluty, *mcp_tools],
         system_prompt=system_msg,
-        checkpointer=InMemorySaver(),
+        checkpointer=checkpointer,
     )
 
     return agent
@@ -131,16 +132,27 @@ async def build_agent():
 
 steps = []
 
-
-async def agent_run():
+async def chat():
     agent = await build_agent()
-    async for response in agent.astream(
-        {"messages": [human_msg]}, config=config, stream_mode="values"
-    ):
-        response["messages"][-1].pretty_print()
-        # print(response.content, end="")
-        steps.append(response)
+    while True:
+        try:
+            text = await asyncio.to_thread(input, "Cześć, w czym Ci dzisiaj pomóc?\n")
+        except (EOFError, KeyboardInterrupt):
+            break
+
+        text = text.strip()
+        if not text:
+            continue
+        if text.lower() in {"exit", "quit", "q"}:
+            break
+
+        prompt = HumanMessage(text)
+        async for response in agent.astream(
+            {"messages": [prompt]}, config=config, stream_mode="values"
+        ):
+            response["messages"][-1].pretty_print()
+            steps.append(response)
 
 
 if __name__ == "__main__":
-    asyncio.run(agent_run())
+    asyncio.run(chat())

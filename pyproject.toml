@@ -5,17 +5,24 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "beautifulsoup4>=4.14.3",
     "ipykernel>=7.2.0",
     "jupyter>=1.1.1",
     "langchain>=1.2.10",
+    "langchain-community>=0.4.1",
     "langchain-core>=1.2.14",
     "langchain-mcp-adapters>=0.2.1",
     "langchain-ollama>=1.0.1",
     "langchain-openai>=1.1.10",
+    "langchain-pinecone>=0.2.13",
+    "langchain-text-splitters>=1.1.1",
     "langgraph-api>=0.7.53",
     "langgraph-cli>=0.4.12",
     "langsmith>=0.7.6",
+    "nest-asyncio>=1.6.0",
     "openai>=2.21.0",
+    "pinecone>=7.3.0",
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.1",
+    "requests>=2.32.5",
 ]

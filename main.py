@@ -2,15 +2,21 @@ import os
 import requests
 import nest_asyncio
 import asyncio
-from langchain_mcp_adapters.client import MultiServerMCPClient
+import bs4
 from typing import Literal
 from dotenv import load_dotenv
+from pinecone import Pinecone, ServerlessSpec
 from langchain.messages import SystemMessage, HumanMessage
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.tools import tool
 from langchain.agents import create_agent
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_ollama import ChatOllama
 from langgraph.checkpoint.memory import InMemorySaver
+from langchain_pinecone import PineconeVectorStore
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import WebBaseLoader
+
 
 load_dotenv()
 
@@ -34,10 +40,64 @@ async def load_mcp():
 
 
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+PINECONE_API_KEY = os.environ["PINECONE_API_KEY"]
 
 
 class LLMError(Exception):
     pass
+
+
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+
+pc = Pinecone(PINECONE_API_KEY)
+
+indexes = pc.list_indexes()
+
+try:
+    index = pc.Index("langchain-agent")
+    print("Znalazłem indeks")
+except Exception as e:
+    print(f"Nie udało się połączyć do indeksu w bazie wektorowej: {e}")
+    print("==== Tworzę nowy indeks w bazie wektorowej ====")
+    index = pc.create_index(
+        name="langchain-agent",
+        dimension=1536,
+        spec=ServerlessSpec(cloud="aws", region="us-east-1"),
+        metric="cosine",
+    )
+    print("Utworzyłem indeks")
+
+
+vector_store = PineconeVectorStore(index=index, embedding=embeddings)
+
+bs4_strainer = bs4.SoupStrainer(class_=("post-title", "post-header", "post-content"))
+loader = WebBaseLoader(
+    web_paths=("https://lilianweng.github.io/posts/2023-06-23-agent/",),
+    bs_kwargs={"parse_only": bs4_strainer},
+)
+docs = loader.load()
+
+assert len(docs) == 1
+
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000, chunk_overlap=200, add_start_index=True
+)
+
+
+all_splits = text_splitter.split_documents(docs)
+
+document_ids = vector_store.add_documents(documents=all_splits)
+
+
+@tool
+def retrive_context(query: str):
+    """Przetwarza informacje z bazy wektorowej w celu udzielenia dokładniejszej odpowiedzi"""
+    retrived_docs = vector_store.similarity_search(query=query, k=3)
+    serialized = "\n\n".join(
+        (f"Source: {doc.metadata}\nContent: {doc.page_content}")
+        for doc in retrived_docs
+    )
+    return serialized, retrived_docs
 
 
 @tool(
@@ -107,7 +167,8 @@ system_msg = SystemMessage(
     """Jesteś moim osobistym pomocnikiem o imieniu Orion, a ja mam na imię Kuba. 
         Obecnie masz bardzo prostego toola podłączonego, który potrafi liczyć proste rzeczy dodawanie, odejmowanie, mnożenie i dzielenie.
         Drugi tool to wyszukiwanie uśrednionego kursu walut wedle kursu NBP - nalezy podawać kod waluty zgodny z oznaczeniem ISO 4217
-        Trzeci tool to serwer mcp, który jest od sprawdzania czasu
+        Trzeci tool to dostęp do bazy wektorowej, która ma za zadanie pogłębić Twoją wiedzę na zadawane pytanie odnośnie tematyki Autonomicznych Agentów zasilanych LLM-ami - używaj go aby udzielać lepszych odpowiedzi użytkownikowi
+        Czwarty tool to serwer mcp, który jest od sprawdzania czasu
     """
 )
 human_msg = HumanMessage(
@@ -122,7 +183,7 @@ async def build_agent():
     mcp_tools = await load_mcp()
     agent = create_agent(
         model=provider,
-        tools=[liczenie, sprawdz_kurs_waluty, *mcp_tools],
+        tools=[liczenie, sprawdz_kurs_waluty, retrive_context, *mcp_tools],
         system_prompt=system_msg,
         checkpointer=checkpointer,
     )
@@ -131,6 +192,7 @@ async def build_agent():
 
 
 steps = []
+
 
 async def chat():
     agent = await build_agent()

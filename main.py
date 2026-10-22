@@ -29,7 +29,7 @@ async def load_mcp():
             "time": {
                 "transport": "stdio",
                 "command": "npx",
-                "args": ["-y", "@theo.foobar/mcp-time"],
+                "args": ["-y", "@theo.foobar/mcp-time@0.4.0"],
             }
         },
     )

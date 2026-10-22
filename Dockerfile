@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim AS node
+FROM node:24.22.1-bookworm-slim AS node
 
 FROM python:3.12
 
